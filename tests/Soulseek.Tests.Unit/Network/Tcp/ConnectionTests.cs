@@ -320,6 +320,74 @@ namespace Soulseek.Tests.Unit.Network.Tcp
             }
         }
 
+        [Trait("Category", "Disconnect")]
+        [Theory(DisplayName = "Disconnect with exception does not leave an unobserved exception"), AutoData]
+        public async Task Disconnect_With_Exception_Does_Not_Leave_An_Unobserved_Exception(IPEndPoint endpoint)
+        {
+            // identifies the exception passed to Disconnect(), so unobserved exceptions raised concurrently by
+            // other tests can't produce a false failure
+            var marker = Guid.NewGuid().ToString();
+            var unobserved = false;
+
+            void Handler(object sender, UnobservedTaskExceptionEventArgs e)
+            {
+                if (e.Exception.Flatten().InnerExceptions.Any(x => x.Message == marker))
+                {
+                    unobserved = true;
+                }
+            }
+
+            TaskScheduler.UnobservedTaskException += Handler;
+
+            try
+            {
+                await DisconnectWithExceptionAsync(endpoint, marker);
+
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                Assert.False(unobserved);
+            }
+            finally
+            {
+                TaskScheduler.UnobservedTaskException -= Handler;
+            }
+        }
+
+        [Trait("Category", "Disconnect")]
+        [Theory(DisplayName = "WaitForDisconnect throws the exception the connection was disconnected with"), AutoData]
+        public async Task WaitForDisconnect_Throws_The_Exception_The_Connection_Was_Disconnected_With(IPEndPoint endpoint)
+        {
+            using (var c = new Connection(endpoint))
+            {
+                c.SetProperty("State", ConnectionState.Connected);
+
+                var expected = new IOException("foo");
+                c.Disconnect("bar", expected);
+
+                var ex = await Record.ExceptionAsync(() => c.WaitForDisconnect());
+
+                Assert.Same(expected, ex);
+            }
+        }
+
+        // kept out of line so the connection (and its disconnect task) is unreachable once this returns
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static async Task DisconnectWithExceptionAsync(IPEndPoint endpoint, string marker)
+        {
+            using (var c = new Connection(endpoint))
+            {
+                c.SetProperty("State", ConnectionState.Connected);
+
+                // nothing calls WaitForDisconnect(), as is the case for most connections
+                c.Disconnect("foo", new IOException(marker));
+            }
+
+            // allow any continuations to run
+            await Task.Delay(100);
+        }
+
         [Trait("Category", "Connect")]
         [Theory(DisplayName = "Connect throws when not pending or disconnected"), AutoData]
         public async Task Connect_Throws_When_Not_Pending_Or_Disconnected(IPEndPoint endpoint)

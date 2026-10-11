@@ -576,6 +576,11 @@ namespace Soulseek.Network.Tcp
                 if (exception != null)
                 {
                     DisconnectTaskCompletionSource.SetException(exception);
+
+                    // only callers of WaitForDisconnect() ever await this task, and nothing in the library does. mark the
+                    // exception as observed right away so that every connection lost to an exception (connect or inactivity
+                    // timeout, read/write failure) doesn't raise an unobserved exception. awaiting callers still receive it.
+                    _ = DisconnectTaskCompletionSource.Task.Exception;
                 }
                 else
                 {
