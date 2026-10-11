@@ -220,6 +220,10 @@ namespace Soulseek.Network
                 timeout: SoulseekClient.Options.TransferConnectionOptions.ConnectTimeout,
                 cancellationToken: directLinkedCts.Token);
 
+            // ensure that whichever attempt loses the race (or faults first) doesn't raise an unobserved exception
+            direct.Forget();
+            indirect.Forget();
+
             var tasks = new[] { direct, indirect }.ToList();
             Task<IConnection> task;
 
@@ -464,6 +468,10 @@ namespace Soulseek.Network
                 var direct = GetMessageConnectionOutboundDirectAsync(username, ipEndPoint, directLinkedCts.Token);
                 var indirect = GetMessageConnectionOutboundIndirectAsync(username, solicitationToken, indirectLinkedCts.Token);
 
+                // ensure that whichever attempt loses the race (or faults first) doesn't raise an unobserved exception
+                direct.Forget();
+                indirect.Forget();
+
                 var tasks = new[] { direct, indirect }.ToList();
                 Task<IMessageConnection> task;
 
@@ -617,6 +625,10 @@ namespace Soulseek.Network
 
             var direct = GetTransferConnectionOutboundDirectAsync(ipEndPoint, token, directLinkedCts.Token);
             var indirect = GetTransferConnectionOutboundIndirectAsync(username, token, indirectLinkedCts.Token);
+
+            // ensure that whichever attempt loses the race (or faults first) doesn't raise an unobserved exception
+            direct.Forget();
+            indirect.Forget();
 
             var tasks = new[] { direct, indirect }.ToList();
             Task<IConnection> task;

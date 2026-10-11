@@ -263,6 +263,10 @@ namespace Soulseek.Network.Tcp
                         connectTask = TcpClient.ConnectAsync(IPEndPoint.Address, IPEndPoint.Port);
                     }
 
+                    // ensure the connect task doesn't raise an unobserved exception if the timeout or cancellation wins the
+                    // race; it is abandoned in that case, and faults once the TcpClient is disposed.
+                    connectTask.Forget();
+
                     // register the TCS with the CTS. when the cancellation fires (due to timeout), it will set the value of the
                     // TCS via the registered delegate, ending the 'fake' task, then bind the externally supplied CT with the same
                     // TCS. either the timeout or the external token can now cancel the operation.

@@ -20,8 +20,10 @@ namespace Soulseek.Tests.Unit.Network.Tcp
     using System;
     using System.Collections.Generic;
     using System.IO;
+    using System.Linq;
     using System.Net;
     using System.Net.Sockets;
+    using System.Runtime.CompilerServices;
     using System.Threading;
     using System.Threading.Tasks;
     using AutoFixture.Xunit2;
@@ -410,6 +412,71 @@ namespace Soulseek.Tests.Unit.Network.Tcp
 
                     t.Verify(m => m.ConnectAsync(It.IsAny<IPAddress>(), It.IsAny<int>()), Times.Once);
                 }
+            }
+        }
+
+        [Trait("Category", "Connect")]
+        [Theory(DisplayName = "Connect does not leave an unobserved exception when timed out"), AutoData]
+        public async Task Connect_Does_Not_Leave_An_Unobserved_Exception_When_Timed_Out(IPEndPoint endpoint)
+        {
+            // identifies the exception faulting the abandoned connect task, so unobserved exceptions raised
+            // concurrently by other tests can't produce a false failure
+            var marker = Guid.NewGuid().ToString();
+            var unobserved = false;
+
+            void Handler(object sender, UnobservedTaskExceptionEventArgs e)
+            {
+                if (e.Exception.Flatten().InnerExceptions.Any(x => x.Message == marker))
+                {
+                    unobserved = true;
+                }
+            }
+
+            TaskScheduler.UnobservedTaskException += Handler;
+
+            try
+            {
+                await TimeOutAndFaultAbandonedConnectTaskAsync(endpoint, marker);
+
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                Assert.False(unobserved);
+            }
+            finally
+            {
+                TaskScheduler.UnobservedTaskException -= Handler;
+            }
+        }
+
+        // kept out of line so the abandoned connect task is unreachable (and finalizable) once this returns
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static async Task TimeOutAndFaultAbandonedConnectTaskAsync(IPEndPoint endpoint, string marker)
+        {
+            using (var socket = new Socket(SocketType.Stream, ProtocolType.IP))
+            {
+                var connectTaskCompletionSource = new TaskCompletionSource<bool>();
+
+                var t = new Mock<ITcpClient>();
+                t.Setup(m => m.Client).Returns(socket);
+                t.Setup(m => m.ConnectAsync(It.IsAny<IPAddress>(), It.IsAny<int>()))
+                    .Returns(connectTaskCompletionSource.Task);
+
+                var o = new ConnectionOptions(connectTimeout: 0);
+
+                using (var c = new Connection(endpoint, options: o, tcpClient: t.Object))
+                {
+                    var ex = await Record.ExceptionAsync(() => c.ConnectAsync());
+
+                    Assert.IsType<TimeoutException>(ex);
+                }
+
+                // the abandoned connect faults after the timeout won the race, as it does once the TcpClient is disposed
+                connectTaskCompletionSource.SetException(new IOException(marker));
+
+                // allow any continuations to run
+                await Task.Delay(100);
             }
         }
 

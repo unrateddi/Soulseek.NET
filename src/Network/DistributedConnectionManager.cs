@@ -878,6 +878,10 @@ namespace Soulseek.Network
             var direct = GetParentCandidateConnectionDirectAsync(username, ipEndPoint, directLinkedCts.Token);
             var indirect = GetParentCandidateConnectionIndirectAsync(username, indirectLinkedCts.Token);
 
+            // ensure that whichever attempt loses the race (or faults first) doesn't raise an unobserved exception
+            direct.Forget();
+            indirect.Forget();
+
             var tasks = new[] { direct, indirect }.ToList();
             Task<IMessageConnection> task;
 
